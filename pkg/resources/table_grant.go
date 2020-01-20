@@ -1,8 +1,6 @@
 package resources
 
 import (
-	"fmt"
-
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 	"github.com/pkg/errors"
@@ -10,14 +8,14 @@ import (
 	"github.com/chanzuckerberg/terraform-provider-snowflake/pkg/snowflake"
 )
 
-var validTablePrivileges = []string{
-	"SELECT",
-	"INSERT",
-	"UPDATE",
-	"DELETE",
-	"TRUNCATE",
-	"REFERENCES",
-}
+var validTablePrivileges = newPrivilegeSet(
+	privilegeSelect,
+	privilegeInsert,
+	privilegeUpdate,
+	privilegeDelete,
+	privilegeTruncate,
+	privilegeReferences,
+)
 
 var tableGrantSchema = map[string]*schema.Schema{
 	"table_name": &schema.Schema{
@@ -44,7 +42,7 @@ var tableGrantSchema = map[string]*schema.Schema{
 		Optional:     true,
 		Description:  "The privilege to grant on the current or future table.",
 		Default:      "SELECT",
-		ValidateFunc: validation.StringInSlice(validTablePrivileges, true),
+		ValidateFunc: validation.StringInSlice(validTablePrivileges.toList(), true),
 		ForceNew:     true,
 	},
 	"roles": &schema.Schema{
@@ -114,23 +112,35 @@ func CreateTableGrant(data *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	// ID format is <db_name>|<schema_name>|<table_name>|<privilege>
 	// table_name is empty when on_future = true
-	if onFuture {
-		data.SetId(fmt.Sprintf("%v|%v||%v", dbName, schemaName, priv))
-	} else {
-		data.SetId(fmt.Sprintf("%v|%v|%v|%v", dbName, schemaName, tableName, priv))
+	grantID := &grantID{
+		ResourceName: dbName,
+		SchemaName:   schemaName,
+		Privilege:    priv,
+	}
+	if !onFuture {
+		grantID.ObjectName = tableName
 	}
 
+	dataIDInput, err := grantID.String()
+	if err != nil {
+		return err
+	}
+	data.SetId(dataIDInput)
 	return ReadTableGrant(data, meta)
 }
 
 // ReadTableGrant implements schema.ReadFunc
 func ReadTableGrant(data *schema.ResourceData, meta interface{}) error {
-	dbName, schemaName, tableName, priv, err := splitGrantID(data.Id())
+	grantID, err := grantIDFromString(data.Id())
 	if err != nil {
 		return err
 	}
+
+	dbName := grantID.ResourceName
+	schemaName := grantID.SchemaName
+	tableName := grantID.ObjectName
+	priv := grantID.Privilege
 	err = data.Set("database_name", dbName)
 	if err != nil {
 		return err
@@ -159,20 +169,23 @@ func ReadTableGrant(data *schema.ResourceData, meta interface{}) error {
 	var builder snowflake.GrantBuilder
 	if onFuture {
 		builder = snowflake.FutureTableGrant(dbName, schemaName)
-		return readGenericGrant(data, meta, builder, true)
 	} else {
 		builder = snowflake.TableGrant(dbName, schemaName, tableName)
-		return readGenericGrant(data, meta, builder, false)
 	}
+
+	return readGenericGrant(data, meta, builder, onFuture, validTablePrivileges)
 }
 
 // DeleteTableGrant implements schema.DeleteFunc
 func DeleteTableGrant(data *schema.ResourceData, meta interface{}) error {
-	dbName, schemaName, tableName, _, err := splitGrantID(data.Id())
+	grantID, err := grantIDFromString(data.Id())
 	if err != nil {
 		return err
 	}
 
+	tableName := grantID.ObjectName
+	dbName := grantID.ResourceName
+	schemaName := grantID.SchemaName
 	onFuture := false
 	if tableName == "" {
 		onFuture = true

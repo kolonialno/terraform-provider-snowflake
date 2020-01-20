@@ -69,6 +69,8 @@ func Provider() *schema.Provider {
 			"snowflake_schema":           resources.Schema(),
 			"snowflake_schema_grant":     resources.SchemaGrant(),
 			"snowflake_share":            resources.Share(),
+			"snowflake_stage":            resources.Stage(),
+			"snowflake_stage_grant":      resources.StageGrant(),
 			"snowflake_user":             resources.User(),
 			"snowflake_view":             resources.View(),
 			"snowflake_view_grant":       resources.ViewGrant(),
@@ -137,7 +139,6 @@ func DSN(s *schema.ResourceData) (string, error) {
 }
 
 func ParsePrivateKey(privateKeyPath string) (*rsa.PrivateKey, error) {
-
 	expandedPrivateKeyPath, err := homedir.Expand(privateKeyPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "Invalid Path to private key")

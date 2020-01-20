@@ -26,7 +26,7 @@ TODO fogg config
 
 ## Authentication
 
-We currently support username + password and keypair auth and suggest that you do so via environment variables. Define a config with something like-
+We currently support username + password, browser and keypair authenthication. We suggest that you do so via environment variables. Define a config with the non-senstive field like-
 
 ```hcl
 provider "snowflake" {
@@ -36,12 +36,14 @@ provider "snowflake" {
 }
 ```
 
+Then set `SNOWFLAKE_USER` and either `SNOWFLAKE_PASSWORD` or `SNOWFLAKE_PRIVATE_KEY_PATH`.
+
 ### Keypair Authentication Environment Variables
-You should generate the public and private keys and set up environment variables. 
+You should generate the public and private keys and set up environment variables.
 
 ```shell
 cd ~/.ssh
-openssl genrsa -out snowflake_key 2048
+openssl genrsa -out snowflake_key 4096
 openssl rsa -in snowflake_key -pubout -out snowflake_key.pub
 ```
 
@@ -58,10 +60,9 @@ export SNOWFLAKE_USER='...'
 export SNOWFLAKE_PASSWORD='...'
 ```
 
-
 ## Resources
 
-We support managing a subset of snowflakedb resources, with a focus on access control and management.
+We support managing a subset of snowflakedb resources, with a focus on access control and management. We've built and support the resources we use. If you are lookig for others to be supported we are more than happy to get PRs merged.
 
 You can see a number of examples [here](examples).
 
@@ -75,10 +76,17 @@ You can see a number of examples [here](examples).
 |-----------------------------|--------|-------------------------------------------------------------------------------|----------|-----------|----------|---------|
 | comment                     | string |                                                                               | true     | false     | false    | ""      |
 | data_retention_time_in_days | int    |                                                                               | true     | false     | true     | <nil>   |
+| from_database               | string | Specify a database to create a clone from.                                    | true     | false     | false    | <nil>   |
 | from_share                  | map    | Specify a provider and a share in this map to create a database from a share. | true     | false     | false    | <nil>   |
 | name                        | string |                                                                               | false    | true      | false    | <nil>   |
 
 ### snowflake_database_grant
+
+**Note**: The snowflake_database_grant resource creates exclusive attachments of grants.
+Across the entire Snowflake account, all of the databases to which a single grant is attached must be declared
+by a single snowflake_database_grant resource. This means that even any snowflake_database that have the attached
+grant via any other mechanism (including other Terraform resources) will have that attached grant revoked by this resource.
+These resources do not enforce exclusive attachment of a grant, it is the user's responsibility to enforce this.
 
 #### properties
 
@@ -112,7 +120,7 @@ You can see a number of examples [here](examples).
 
 |            NAME            |  TYPE  |                                                                   DESCRIPTION                                                                   | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT |
 |----------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------------------------|----------|-----------|----------|---------|
-| credit_quota               | int    | The number of credits allocated monthly to the resource monitor.                                                                                | true     | false     | true     | <nil>   |
+| credit_quota               | float  | The amount of credits allocated monthly to the resource monitor, round up to 2 decimal places.                                                  | true     | false     | true     | <nil>   |
 | end_timestamp              | string | The date and time when the resource monitor suspends the assigned warehouses.                                                                   | true     | false     | false    | <nil>   |
 | frequency                  | string | The frequency interval at which the credit usage resets to 0. If you set a frequency for a resource monitor, you must also set START_TIMESTAMP. | true     | false     | true     | <nil>   |
 | name                       | string | Identifier for the resource monitor; must be unique for your account.                                                                           | false    | true      | false    | <nil>   |
@@ -155,6 +163,12 @@ You can see a number of examples [here](examples).
 
 ### snowflake_schema_grant
 
+**Note**: The snowflake_schema_grant resource creates exclusive attachments of grants.
+Across the entire Snowflake account, all of the schemas to which a single grant is attached must be declared
+by a single snowflake_schema_grant resource. This means that even any snowflake_schema that have the attached
+grant via any other mechanism (including other Terraform resources) will have that attached grant revoked by this resource.
+These resources do not enforce exclusive attachment of a grant, it is the user's responsibility to enforce this.
+
 #### properties
 
 |     NAME      |  TYPE  |                                                                  DESCRIPTION                                                                  | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT |
@@ -171,11 +185,54 @@ You can see a number of examples [here](examples).
 
 |   NAME   |  TYPE  |                                              DESCRIPTION                                              | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT |
 |----------|--------|-------------------------------------------------------------------------------------------------------|----------|-----------|----------|---------|
-| accounts | set    | A list of accounts to be added to the share.                                                          | true     | false     | false    | <nil>   |
+| accounts | list   | A list of accounts to be added to the share.                                                          | true     | false     | false    | <nil>   |
 | comment  | string | Specifies a comment for the managed account.                                                          | true     | false     | false    | <nil>   |
 | name     | string | Specifies the identifier for the share; must be unique for the account in which the share is created. | false    | true      | false    | <nil>   |
 
+### snowflake_stage
+
+#### properties
+
+|        NAME        |  TYPE  |                                                    DESCRIPTION                                                    | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT |
+|--------------------|--------|-------------------------------------------------------------------------------------------------------------------|----------|-----------|----------|---------|
+| aws_external_id    | string |                                                                                                                   | true     | false     | true     | <nil>   |
+| comment            | string | Specifies a comment for the stage.                                                                                | true     | false     | false    | <nil>   |
+| copy_options       | string | Specifies the copy options for the stage.                                                                         | true     | false     | false    | <nil>   |
+| credentials        | string | Specifies the credentials for the stage.                                                                          | true     | false     | false    | <nil>   |
+| database           | string | The database in which to create the stage.                                                                        | false    | true      | false    | <nil>   |
+| encryption         | string | Specifies the encryption settings for the stage.                                                                  | true     | false     | false    | <nil>   |
+| file_format        | string | Specifies the file format for the stage.                                                                          | true     | false     | false    | <nil>   |
+| name               | string | Specifies the identifier for the stage; must be unique for the database and schema in which the stage is created. | false    | true      | false    | <nil>   |
+| schema             | string | The schema in which to create the stage.                                                                          | false    | true      | false    | <nil>   |
+| snowflake_iam_user | string |                                                                                                                   | true     | false     | true     | <nil>   |
+| url                | string | Specifies the URL for the stage.                                                                                  | true     | false     | false    | <nil>   |
+
+### snowflake_stage_grant
+
+**Note**: The snowflake_stage_grant resource creates exclusive attachments of grants.
+Across the entire Snowflake account, all of the stages to which a single grant is attached must be declared
+by a single snowflake_stage_grant resource. This means that even any snowflake_stage that have the attached
+grant via any other mechanism (including other Terraform resources) will have that attached grant revoked by this resource.
+These resources do not enforce exclusive attachment of a grant, it is the user's responsibility to enforce this.
+
+#### properties
+
+|     NAME      |  TYPE  |                                     DESCRIPTION                                     | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT |
+|---------------|--------|-------------------------------------------------------------------------------------|----------|-----------|----------|---------|
+| database_name | string | The name of the database containing the current stage on which to grant privileges. | false    | true      | false    | <nil>   |
+| privilege     | string | The privilege to grant on the stage.                                                | true     | false     | false    | "USAGE" |
+| roles         | set    | Grants privilege to these roles.                                                    | true     | false     | false    | <nil>   |
+| schema_name   | string | The name of the schema containing the current stage on which to grant privileges.   | false    | true      | false    | <nil>   |
+| shares        | set    | Grants privilege to these shares.                                                   | true     | false     | false    | <nil>   |
+| stage_name    | string | The name of the stage on which to grant privileges.                                 | false    | true      | false    | <nil>   |
+
 ### snowflake_table_grant
+
+**Note**: The snowflake_table_grant resource creates exclusive attachments of grants.
+Across the entire Snowflake account, all of the tables to which a single grant is attached must be declared
+by a single snowflake_table_grant resource. This means that even any snowflake_table that have the attached
+grant via any other mechanism (including other Terraform resources) will have that attached grant revoked by this resource.
+These resources do not enforce exclusive attachment of a grant, it is the user's responsibility to enforce this.
 
 #### properties
 
@@ -223,6 +280,12 @@ You can see a number of examples [here](examples).
 
 ### snowflake_view_grant
 
+**Note**: The snowflake_view_grant resource creates exclusive attachments of grants.
+Across the entire Snowflake account, all of the views to which a single grant is attached must be declared
+by a single snowflake_view_grant resource. This means that even any snowflake_view that have the attached
+grant via any other mechanism (including other Terraform resources) will have that attached grant revoked by this resource.
+These resources do not enforce exclusive attachment of a grant, it is the user's responsibility to enforce this.
+
 #### properties
 
 |     NAME      |  TYPE  |                                                                          DESCRIPTION                                                                          | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT  |
@@ -255,6 +318,12 @@ You can see a number of examples [here](examples).
 
 ### snowflake_warehouse_grant
 
+**Note**: The snowflake_warehouse_grant resource creates exclusive attachments of grants.
+Across the entire Snowflake account, all of the warehouses to which a single grant is attached must be declared
+by a single snowflake_warehouse_grant resource. This means that even any snowflake_warehouse that have the attached
+grant via any other mechanism (including other Terraform resources) will have that attached grant revoked by this resource.
+These resources do not enforce exclusive attachment of a grant, it is the user's responsibility to enforce this.
+
 #### properties
 
 |      NAME      |  TYPE  |                       DESCRIPTION                       | OPTIONAL | REQUIRED  | COMPUTED | DEFAULT |
@@ -268,9 +337,9 @@ You can see a number of examples [here](examples).
 
 To do development you need Go installed, this repo cloned and that's about it. It has not been tested on Windows, so if you find problems let us know.
 
-If you want to build and test the provider localling there is a make target `make install-tf` that will build the provider binary and install it in a location that terraform can find.
+If you want to build and test the provider locally there is a make target `make install-tf` that will build the provider binary and install it in a location that terraform can find.
 
-### Testing
+## Testing
 
 For the Terraform resources, there are 3 levels of testing - internal, unit and acceptance tests.
 
@@ -284,4 +353,16 @@ The 'acceptance' tests run the full stack, creating, modifying and destroying re
 
 To run all tests, including the acceptance tests, run `make test-acceptance`.
 
-Note that we also run all tests in our [Travis-CI account](https://travis-ci.com/chanzuckerberg/terraform-provider-snowflake).
+We also run all tests in our [Travis-CI account](https://travis-ci.com/chanzuckerberg/terraform-provider-snowflake).
+
+### Pull Request CI
+
+Our CI jobs run the full acceptence test suite, which involves creating and destroying resources in a live snowflake account. Travis-CI is configured with environment variables to authenticate to our test snowflake account. For security reasons, those variables are not available to forks of this repo.
+
+If you are making a PR from a forked repo, you can set up Travis to build it by setting these environement variables:
+
+* `SNOWFLAKE_ACCOUNT` - The account name
+* `SNOWFLAKE_USER` - A snowflake user for running tests.
+* `SNOWFLAKE_PASSWORD` - Password for that user.
+* `SNOWFLAKE_ROLE` - Needs to be ACCOUNTADMIN or similar.
+* `SNOWFLAKE_REGION` - Default is us-west-2, set this if your snowflake account is in a different region.

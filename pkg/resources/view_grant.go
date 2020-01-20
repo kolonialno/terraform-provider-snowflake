@@ -1,9 +1,6 @@
 package resources
 
 import (
-	"bytes"
-	"encoding/csv"
-
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 	"github.com/pkg/errors"
@@ -11,7 +8,9 @@ import (
 	"github.com/chanzuckerberg/terraform-provider-snowflake/pkg/snowflake"
 )
 
-var validViewPrivileges = []string{"SELECT"}
+var ValidViewPrivileges = newPrivilegeSet(
+	privilegeSelect,
+)
 
 var viewGrantSchema = map[string]*schema.Schema{
 	"view_name": &schema.Schema{
@@ -38,7 +37,7 @@ var viewGrantSchema = map[string]*schema.Schema{
 		Optional:     true,
 		Description:  "The privilege to grant on the current or future view.",
 		Default:      "SELECT",
-		ValidateFunc: validation.StringInSlice(validViewPrivileges, true),
+		ValidateFunc: validation.StringInSlice(ValidViewPrivileges.toList(), true),
 		ForceNew:     true,
 	},
 	"roles": &schema.Schema{
@@ -111,37 +110,32 @@ func CreateViewGrant(data *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	// ID format is <db_name>|<schema_name>|<view_name>|<privilege>
-	dataIdentifiers := make([][]string, 1)
-	dataIdentifiers[0] = make([]string, 4)
-	dataIdentifiers[0][0] = dbName
-	dataIdentifiers[0][1] = schemaName
-	dataIdentifiers[0][2] = viewName
-	dataIdentifiers[0][3] = priv
-
-	var buf bytes.Buffer
-	csvWriter := csv.NewWriter(&buf)
-	csvWriter.Comma = '|'
-	err = csvWriter.WriteAll(dataIdentifiers)
+	grant := &grantID{
+		ResourceName: dbName,
+		SchemaName:   schemaName,
+		ObjectName:  viewName,
+		Privilege:    priv,
+	}
+	dataIDInput, err := grant.String()
 	if err != nil {
 		return err
 	}
-
-	if err := csvWriter.Error(); err != nil {
-		return err
-	}
-
-	data.SetId(buf.String())
+	data.SetId(dataIDInput)
 
 	return ReadViewGrant(data, meta)
 }
 
 // ReadViewGrant implements schema.ReadFunc
 func ReadViewGrant(data *schema.ResourceData, meta interface{}) error {
-	dbName, schemaName, viewName, priv, err := splitGrantID(data.Id())
+	grantID, err := grantIDFromString(data.Id())
 	if err != nil {
 		return err
 	}
+	dbName := grantID.ResourceName
+	schemaName := grantID.SchemaName
+	viewName := grantID.ObjectName
+	priv := grantID.Privilege
+
 	err = data.Set("database_name", dbName)
 	if err != nil {
 		return err
@@ -150,15 +144,15 @@ func ReadViewGrant(data *schema.ResourceData, meta interface{}) error {
 	if err != nil {
 		return err
 	}
-	futureViews := false
+	futureViewsEnabled := false
 	if viewName == "" {
-		futureViews = true
+		futureViewsEnabled = true
 	}
 	err = data.Set("view_name", viewName)
 	if err != nil {
 		return err
 	}
-	err = data.Set("on_future", futureViews)
+	err = data.Set("on_future", futureViewsEnabled)
 	if err != nil {
 		return err
 	}
@@ -168,26 +162,26 @@ func ReadViewGrant(data *schema.ResourceData, meta interface{}) error {
 	}
 
 	var builder snowflake.GrantBuilder
-	if futureViews {
+	if futureViewsEnabled {
 		builder = snowflake.FutureViewGrant(dbName, schemaName)
-		return readGenericGrant(data, meta, builder, true)
 	} else {
 		builder = snowflake.ViewGrant(dbName, schemaName, viewName)
-		return readGenericGrant(data, meta, builder, false)
 	}
+
+	return readGenericGrant(data, meta, builder, futureViewsEnabled, ValidViewPrivileges)
 }
 
 // DeleteViewGrant implements schema.DeleteFunc
 func DeleteViewGrant(data *schema.ResourceData, meta interface{}) error {
-	dbName, schemaName, viewName, _, err := splitGrantID(data.Id())
+	grantID, err := grantIDFromString(data.Id())
 	if err != nil {
 		return err
 	}
+	dbName := grantID.ResourceName
+	schemaName := grantID.SchemaName
+	viewName := grantID.ObjectName
 
-	futureViews := false
-	if viewName == "" {
-		futureViews = true
-	}
+	futureViews := (viewName == "")
 
 	var builder snowflake.GrantBuilder
 	if futureViews {

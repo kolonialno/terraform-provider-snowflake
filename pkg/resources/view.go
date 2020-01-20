@@ -3,13 +3,15 @@ package resources
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
+	"github.com/chanzuckerberg/terraform-provider-snowflake/pkg/snowflake"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/pkg/errors"
-
-	"github.com/chanzuckerberg/terraform-provider-snowflake/pkg/snowflake"
 )
+
+var space = regexp.MustCompile(`\s+`)
 
 var viewSchema = map[string]*schema.Schema{
 	"name": &schema.Schema{
@@ -46,6 +48,13 @@ var viewSchema = map[string]*schema.Schema{
 		Required:    true,
 		Description: "Specifies the query used to create the view.",
 		ForceNew:    true,
+		DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+			oldCollapseSpaces := space.ReplaceAllString(old, " ")
+			newCollapseSpaces := space.ReplaceAllString(new, " ")
+
+			return oldCollapseSpaces == newCollapseSpaces
+
+		},
 	},
 }
 
@@ -82,6 +91,10 @@ func CreateView(data *schema.ResourceData, meta interface{}) error {
 
 	if v, ok := data.GetOk("comment"); ok {
 		builder.WithComment(v.(string))
+	}
+
+	if v, ok := data.GetOk("schema"); ok {
+		builder.WithSchema(v.(string))
 	}
 
 	q := builder.Create()
@@ -129,7 +142,21 @@ func ReadView(data *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	return err
+	err = data.Set("schema", schemaName.String)
+	if err != nil {
+		return err
+	}
+
+	// Want to only capture the Select part of the query because before that is the Create part of the view which we no longer care about
+	cleanString := space.ReplaceAllString(text.String, " ")
+	indexOfSelect := strings.Index(strings.ToUpper(cleanString), " AS SELECT")
+	substringOfQuery := cleanString[indexOfSelect+4:]
+	err = data.Set("statement", substringOfQuery)
+	if err != nil {
+		return err
+	}
+
+	return data.Set("database", databaseName.String)
 }
 
 // UpdateView implements schema.UpdateFunc

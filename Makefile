@@ -1,8 +1,9 @@
 SHA=$(shell git rev-parse --short HEAD)
 VERSION=$(shell cat VERSION)
-DIRTY=$(shell if `git diff-index --quiet HEAD --`; then echo false; else echo true;  fi)
+export DIRTY=$(shell if `git diff-index --quiet HEAD --`; then echo false; else echo true;  fi)
 # TODO add release flag
-LDFLAGS=-ldflags "-w -s -X github.com/chanzuckerberg/terraform-provider-snowflake/util.GitSha=${SHA} -X github.com/chanzuckerberg/terraform-provider-snowflake/util.Version=${VERSION} -X github.com/chanzuckerberg/terraform-provider-snowflake/util.Dirty=${DIRTY}"
+LDFLAGS=-ldflags "-w -s -X github.com/chanzuckerberg/terraform-provider-snowflake/pkg/version.GitSha=${SHA} -X github.com/chanzuckerberg/terraform-provider-snowflake/pkg/version.Version=${VERSION} -X github.com/chanzuckerberg/terraform-provider-snowflake/pkg/version.Dirty=${DIRTY}"
+export BASE_BINARY_NAME=terraform-provider-snowflake_v$(VERSION)
 export GOFLAGS=-mod=vendor
 export GO111MODULE=on
 
@@ -10,13 +11,23 @@ all: test docs install
 .PHONY: all
 
 setup: ## setup development dependencies
-	curl -L https://raw.githubusercontent.com/chanzuckerberg/bff/master/download.sh | sh
+	curl -sfL https://raw.githubusercontent.com/chanzuckerberg/bff/master/download.sh | sh
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh
+	curl -sfL https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh| sh
 .PHONY: setup
 
 lint: ## run the fast go linters
-	./bin/golangci-lint run
+	./bin/reviewdog -conf .reviewdog.yml  -diff "git diff master"
 .PHONY: lint
+
+lint-ci: ## run the fast go linters
+	./bin/reviewdog -conf .reviewdog.yml  -reporter=github-pr-review
+.PHONY: lint-ci
+
+lint-all: ## run the fast go linters
+	# doesn't seem to be a way to get reviewdog to not filter by diff
+	./bin/golangci-lint run
+.PHONY: lint-all
 
 release: ## run a release
 	./bin/bff bump
@@ -25,7 +36,7 @@ release: ## run a release
 .PHONY: release
 
 release-prerelease: build ## release to github as a 'pre-release'
-	version=`./terraform-provider-snowflake version`; \
+	version=`./$(BASE_BINARY_NAME) -version`; \
 	git tag v"$$version"; \
 	git push
 	git push --tags
@@ -37,7 +48,7 @@ release-snapshot: ## run a release
 .PHONY: release-snapshot
 
 build: ## build the binary
-	go build ${LDFLAGS} .
+	go build ${LDFLAGS} -o $(BASE_BINARY_NAME) .
 .PHONY: build
 
 coverage: ## run the go coverage tool, reading file coverage.out
@@ -67,7 +78,7 @@ install: ## install the terraform-provider-snowflake binary in $GOPATH/bin
 
 install-tf: build ## installs plugin where terraform can find it
 	mkdir -p $(HOME)/.terraform.d/plugins
-	cp ./terraform-provider-snowflake $(HOME)/.terraform.d/plugins
+	cp ./$(BASE_BINARY_NAME) $(HOME)/.terraform.d/plugins/$(BASE_BINARY_NAME)
 .PHONY: install-tf
 
 help: ## display help for this makefile

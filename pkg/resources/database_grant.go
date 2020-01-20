@@ -1,18 +1,21 @@
 package resources
 
 import (
-	"fmt"
-
+	"github.com/chanzuckerberg/terraform-provider-snowflake/pkg/snowflake"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
-
-	"github.com/chanzuckerberg/terraform-provider-snowflake/pkg/snowflake"
 )
 
-var validDatabasePrivileges = []string{
-	"ALL", "CREATE SCHEMA", "IMPORTED PRIVILEGES", "MODIFY", "MONITOR",
-	"OWNERSHIP", "REFERENCE_USAGE", "USAGE",
-}
+var ValidDatabasePrivileges = newPrivilegeSet(
+	privilegeAll,
+	privilegeCreateSchema,
+	privilegeImportedPrivileges,
+	privilegeModify,
+	privilegeMonitor,
+	privilegeOwnership,
+	privilegeReferenceUsage,
+	privilegeUsage,
+)
 
 var databaseGrantSchema = map[string]*schema.Schema{
 	"database_name": &schema.Schema{
@@ -26,7 +29,7 @@ var databaseGrantSchema = map[string]*schema.Schema{
 		Optional:     true,
 		Description:  "The privilege to grant on the database.",
 		Default:      "USAGE",
-		ValidateFunc: validation.StringInSlice(validDatabasePrivileges, true),
+		ValidateFunc: validation.StringInSlice(ValidDatabasePrivileges.toList(), true),
 		ForceNew:     true,
 	},
 	"roles": &schema.Schema{
@@ -70,36 +73,43 @@ func CreateDatabaseGrant(data *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	// ID format is <db_name>|||<privilege>
-	data.SetId(fmt.Sprintf("%v|||%v", dbName, priv))
+	grant := &grantID{
+		ResourceName: dbName,
+		Privilege:    priv,
+	}
+	dataIDInput, err := grant.String()
+	if err != nil {
+		return err
+	}
+	data.SetId(dataIDInput)
 
 	return ReadDatabaseGrant(data, meta)
 }
 
 // ReadDatabaseGrant implements schema.ReadFunc
 func ReadDatabaseGrant(data *schema.ResourceData, meta interface{}) error {
-	dbName, _, _, priv, err := splitGrantID(data.Id())
+	grantID, err := grantIDFromString(data.Id())
 	if err != nil {
 		return err
 	}
-	err = data.Set("database_name", dbName)
+	err = data.Set("database_name", grantID.ResourceName)
 	if err != nil {
 		return err
 	}
-	err = data.Set("privilege", priv)
+	err = data.Set("privilege", grantID.Privilege)
 	if err != nil {
 		return err
 	}
 
 	// IMPORTED PRIVILEGES is not a real resource, so we can't actually verify
 	// that it is still there. Just exit for now
-	if priv == "IMPORTED PRIVILEGES" {
+	if grantID.Privilege == "IMPORTED PRIVILEGES" {
 		return nil
 	}
 
-	builder := snowflake.DatabaseGrant(dbName)
+	builder := snowflake.DatabaseGrant(grantID.ResourceName)
 
-	return readGenericGrant(data, meta, builder, false)
+	return readGenericGrant(data, meta, builder, false, ValidDatabasePrivileges)
 }
 
 // DeleteDatabaseGrant implements schema.DeleteFunc
